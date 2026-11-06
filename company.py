@@ -7,8 +7,8 @@ Two backends:
   * local   (default, free, offline): deterministic department agents that
             turn your tasks into deliverables and keep a company state file.
   * grokbot: delegates to real Grok Bot agents through the `gbot` CLI
-            (requires the Grok Bot desktop app signed in; Grok Bot access
-            needs a paid xAI/Cursor plan).
+            (EXPERIMENTAL and untested; needs the Grok Bot desktop app signed in
+            and a paid plan; must be enabled with --experimental-grokbot).
 
 No third-party Python packages are required.
 """
@@ -219,36 +219,65 @@ def cmd_grok_sync(state: dict, args: argparse.Namespace) -> str:
 
 
 
+def parse_agent_file(path: Path) -> dict | None:
+    """Parse an Agency Agents file. Real agents start with YAML front matter
+    that has a `name:` line; other markdown (README, playbooks) is skipped."""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    meta: dict = {}
+    for ln in lines[1:]:
+        if ln.strip() == "---":
+            break
+        if ":" in ln and not ln.startswith(" "):
+            key, _, val = ln.partition(":")
+            meta[key.strip()] = val.strip().strip('"').strip("'")
+    if "name" not in meta:
+        return None
+    return {
+        "name": meta["name"],
+        "description": meta.get("description", ""),
+        "vibe": meta.get("vibe", ""),
+    }
+
+
 def cmd_agency_import(state: dict, args: argparse.Namespace) -> str:
     """Import specialist agents from an Agency Agents roster folder.
 
-    Scans the folder recursively for *.md agent definitions and registers each
-    one as a company specialist. Works with a clone of
-    https://github.com/ganeshsavara61-netizen/agency-agents (MIT licensed,
-    upstream: https://github.com/msitarzewski/agency-agents).
+    Works with a clone of https://github.com/ganeshsavara61-netizen/agency-agents
+    (MIT, upstream: https://github.com/msitarzewski/agency-agents). Only files
+    with agent front matter are imported; the folder name is the division.
     """
-    roster = Path(args.roster)
+    roster = Path(args.roster).resolve()
     if not roster.is_dir():
         raise SystemExit(f"roster folder not found: {roster}")
-    found = sorted(p for p in roster.rglob("*.md")
-                   if p.name.lower() not in ("readme.md", "license.md", "contributing.md"))
-    if not found:
-        raise SystemExit(f"no agent .md files found under {roster}")
     specialists = state.setdefault("specialists", {})
-    added = 0
-    for path in found:
-        name = path.stem
-        first_line = next(
-            (ln.strip("# \t") for ln in path.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()),
-            "",
-        )
-        if name not in specialists:
+    added = skipped = 0
+    for path in sorted(roster.rglob("*.md")):
+        rel = path.relative_to(roster)
+        if ".git" in rel.parts or len(rel.parts) < 2:
+            continue
+        info = parse_agent_file(path)
+        if info is None:
+            skipped += 1
+            continue
+        slug = path.stem
+        if slug not in specialists:
             added += 1
-        specialists[name] = {"source": str(path), "summary": first_line[:120]}
+        specialists[slug] = {
+            "division": rel.parts[0],
+            "name": info["name"],
+            "summary": info["description"][:160],
+            "vibe": info["vibe"],
+            "source": str(path),
+        }
+    if not specialists:
+        raise SystemExit(f"no agent files with front matter found under {roster}")
     return (
-        f"Agency import: {len(found)} specialist agent(s) found in {roster}, "
-        f"{added} new. Total on payroll: {len(specialists)}.\n"
-        "List them with: python company.py agency-list"
+        f"Agency import: {added} new specialist(s), {skipped} non-agent file(s) skipped. "
+        f"Total on payroll: {len(specialists)}.\n"
+        "List them with: python company.py agency-list [--division engineering]"
     )
 
 
@@ -258,10 +287,36 @@ def cmd_agency_list(state: dict, args: argparse.Namespace) -> str:
         return ("No specialists hired yet. Import your Agency Agents roster:\n"
                 "  git clone https://github.com/ganeshsavara61-netizen/agency-agents\n"
                 "  python company.py agency-import --roster agency-agents")
-    lines = [f"Specialist agents on payroll: {len(specialists)}", ""]
-    for name in sorted(specialists):
-        lines.append(f"  {name}: {specialists[name]['summary']}")
+    division = getattr(args, "division", None)
+    rows = {k: v for k, v in specialists.items() if not division or v["division"] == division}
+    if not rows:
+        divs = sorted({v["division"] for v in specialists.values()})
+        raise SystemExit(f"no specialists in division '{division}'. Divisions: {', '.join(divs)}")
+    lines = [f"Specialist agents on payroll: {len(rows)}", ""]
+    for slug in sorted(rows):
+        v = rows[slug]
+        lines.append(f"  [{v['division']}] {slug} - {v['name']}: {v['summary'][:90]}")
     return "\n".join(lines)
+
+
+def cmd_agency_assign(state: dict, args: argparse.Namespace) -> str:
+    """Give a task to an imported specialist. Local mode records a brief that
+    quotes the specialist's own role; it does not call any AI model."""
+    specialists = state.get("specialists", {})
+    spec = specialists.get(args.specialist)
+    if spec is None:
+        raise SystemExit(f"unknown specialist '{args.specialist}'. Run: python company.py agency-list")
+    task_id = state["next_id"]
+    state["next_id"] += 1
+    brief = (f"Brief for {spec['name']} ({spec['division']}): '{args.task}'. "
+             f"Role: {spec['summary']} Role file: {spec['source']}")
+    state["tasks"].append({
+        "id": task_id, "department": "agency:" + spec["division"], "owner": spec["name"],
+        "task": args.task, "status": "briefed", "deliverable": brief,
+        "created": now_iso(), "completed": None,
+    })
+    return (f"Task #{task_id} briefed to {spec['name']} [{spec['division']}].\n"
+            "Status: briefed (open - a human or an AI tool must do the work)\n" + brief)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -271,6 +326,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--backend", choices=["local", "grokbot"], default="local",
                         help="local = free offline agents (default); grokbot = real Grok Bot agents via the gbot CLI")
+    parser.add_argument("--experimental-grokbot", action="store_true",
+                        help="required to use --backend grokbot (untested adapter, needs a paid Grok Bot plan)")
     parser.add_argument("--state", default=DEFAULT_STATE_FILE, help="path to the company state file")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -291,7 +348,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_import = sub.add_parser("agency-import", help="import specialist agents from an Agency Agents roster folder")
     p_import.add_argument("--roster", required=True, help="path to a cloned agency-agents repository")
 
-    sub.add_parser("agency-list", help="list imported specialist agents")
+    p_alist = sub.add_parser("agency-list", help="list imported specialist agents")
+    p_alist.add_argument("--division", default=None, help="only this division, e.g. engineering")
+
+    p_aassign = sub.add_parser("agency-assign", help="brief a task to an imported specialist")
+    p_aassign.add_argument("--specialist", required=True, help="specialist slug from agency-list")
+    p_aassign.add_argument("--task", required=True)
     return parser
 
 
@@ -305,11 +367,15 @@ COMMANDS = {
     "grok-sync": cmd_grok_sync,
     "agency-import": cmd_agency_import,
     "agency-list": cmd_agency_list,
+    "agency-assign": cmd_agency_assign,
 }
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.backend == "grokbot" and not args.experimental_grokbot:
+        raise SystemExit("The grokbot backend is experimental and untested. It needs a paid Grok Bot "
+                         "plan and the gbot CLI. Add --experimental-grokbot to use it anyway.")
     state = load_state(Path(args.state))
     output = COMMANDS[args.command](state, args)
     if args.backend == "local":
