@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+company_state.json
+state.json
