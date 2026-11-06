@@ -7,6 +7,6 @@ set -euo pipefail
 npm install --global grok-bot-cli
 gbot bots list   # verifies the app session works
 
-python3 company.py --backend grokbot grok-sync
+python3 company.py --experimental-grokbot --backend grokbot grok-sync
 
 echo "Done. Open Grok Bot and check the Boardroom group."
