@@ -5,6 +5,6 @@
 npm install --global grok-bot-cli
 gbot bots list   # verifies the app session works
 
-python company.py --backend grokbot grok-sync
+python company.py --experimental-grokbot --backend grokbot grok-sync
 
 Write-Host "Done. Open Grok Bot and check the Boardroom group."
