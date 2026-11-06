@@ -8,7 +8,7 @@ runs anywhere with plain Python, and a bridge that hires the specialist
 roster from your Agency Agents fork.
 
 - You are the CEO. The agents work for you.
-- Every command below is real and tested (12 automated tests, all passing).
+- Every command below is real and tested (16 automated tests; the real-roster test runs when AGENCY_ROSTER is set).
 - Free to build, copy and run in local mode. No paid API is needed for local mode.
 
 ## The company
@@ -52,21 +52,22 @@ python company.py report
 On Windows use `python` (or `py`) instead of `python3`. No install step, no
 packages, no keys.
 
-## Grok Bot mode (real AI teammates)
+## Grok Bot mode (EXPERIMENTAL, untested)
 
-When you have Grok Bot access:
+Grok Bot is xAI's desktop app of named AI teammates (separate from the @grok
+chatbot on X). Access needs a paid plan (SuperGrok or a paid Cursor plan), so
+this mode is **not free**. The adapter uses the community `gbot` CLI
+(npm `grok-bot-cli`, MIT). The commands match its README, but this adapter has
+never been run against a real Grok Bot account. It is blocked unless you pass
+`--experimental-grokbot`, so nothing paid or remote runs by accident.
 
 ```sh
-# one-time setup: installs gbot, creates the 5 agents and the Boardroom group
 bash scripts/setup_grokbot.sh        # Windows: scripts\setup_grokbot.ps1
-
-# now orders go to real Grok Bot agents
-python company.py --backend grokbot assign --department marketing --task "Draft the launch post"
-python company.py --backend grokbot board-meeting --agenda "Launch readiness review"
+python company.py --experimental-grokbot --backend grokbot assign --department marketing --task "Draft the launch post"
 ```
 
-Each agent's personality and rules live in `agents/*.md` and are pushed into
-the Grok Bot agent's Instructions field during setup.
+If you meant a different "Grok Bot", tell the repo owner; this adapter is the
+only part that would change.
 
 ## All commands
 
@@ -79,26 +80,30 @@ standup        latest task status per department
 board-meeting  run a board meeting round
 report         CEO report: totals and department breakdown
 status         backend and gbot availability
-grok-sync      create the company as real Grok Bot agents (needs gbot)
+grok-sync      create the company as real Grok Bot agents (experimental)
+agency-import  import specialists from an agency-agents clone
+agency-list    list specialists (--division)
+agency-assign  brief a task to a specialist
 ```
 
 ## Hire the whole Agency (your agency-agents fork)
 
-This company plugs straight into your fork of
-[Agency Agents](https://github.com/ganeshsavara61-netizen/agency-agents)
-(upstream: [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents),
-MIT licensed) - a roster of specialist AI agents (frontend wizards, Reddit
-community ninjas, reality checkers and more). Import the roster and they join
-your company payroll:
+Tested against the real fork
+[ganeshsavara61-netizen/agency-agents](https://github.com/ganeshsavara61-netizen/agency-agents)
+(upstream [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents), MIT):
+it imports 284 specialist agents across the divisions (engineering, marketing,
+finance, sales, strategy and more).
 
 ```sh
 git clone https://github.com/ganeshsavara61-netizen/agency-agents
 python company.py agency-import --roster agency-agents
-python company.py agency-list
+python company.py agency-list --division engineering
+python company.py agency-assign --specialist finance-fpa-analyst --task "Draft a 3 month budget"
 ```
 
-The five executives run the departments; the imported specialists are the
-talent pool you can point Grok Bot at as you grow.
+`agency-assign` records a brief with status `briefed`. It does not run an AI
+model: a person or an AI tool (Claude Code, Cursor, and so on, which the Agency
+Agents app can install these roles into) still has to do the work.
 
 ## Honest limits
 
