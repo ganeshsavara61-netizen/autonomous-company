@@ -81,41 +81,87 @@ if __name__ == "__main__":
     unittest.main()
 
 
+def make_roster(base):
+    roster = Path(base) / "agency-agents"
+    (roster / "engineering").mkdir(parents=True)
+    (roster / "engineering" / "engineering-frontend-wizard.md").write_text(
+        '---\nname: Frontend Wizard\ndescription: "Builds pixel perfect interfaces."\nvibe: Ships fast\n---\n\n# Frontend Wizard\n')
+    (roster / "marketing").mkdir()
+    (roster / "marketing" / "marketing-reddit-ninja.md").write_text(
+        "---\nname: Reddit Ninja\ndescription: Grows communities.\n---\n# Reddit Ninja\n")
+    (roster / "engineering" / "PLAYBOOK.md").write_text("# Phase 4 Playbook\nno front matter\n")
+    (roster / "README.md").write_text("# The Agency\n")
+    return roster
+
+
 class TestAgencyBridge(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = self.tmp.name
-        self.roster = Path(self.dir) / "agency-agents"
-        (self.roster / "engineering").mkdir(parents=True)
-        (self.roster / "engineering" / "frontend-wizard.md").write_text(
-            "# Frontend Wizard\nBuilds pixel perfect interfaces.\n")
-        (self.roster / "reddit-ninja.md").write_text(
-            "# Reddit Ninja\nGrows communities.\n")
-        (self.roster / "README.md").write_text("# The Agency\n")
+        self.roster = make_roster(self.dir)
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_agency_import_and_list(self):
+    def test_import_reads_front_matter_and_skips_non_agents(self):
         result = run_cli(self.dir, "agency-import", "--roster", str(self.roster))
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("2 specialist agent(s) found", result.stdout)
-        self.assertIn("2 new", result.stdout)
+        self.assertIn("2 new specialist(s), 1 non-agent file(s) skipped", result.stdout)
         listing = run_cli(self.dir, "agency-list")
-        self.assertIn("frontend-wizard", listing.stdout)
-        self.assertIn("reddit-ninja", listing.stdout)
-        self.assertNotIn("README", listing.stdout)
+        self.assertIn("[engineering] engineering-frontend-wizard - Frontend Wizard: Builds pixel perfect", listing.stdout)
+        self.assertNotIn("PLAYBOOK", listing.stdout)
+        self.assertNotIn("---", listing.stdout)
 
-    def test_agency_import_missing_folder_fails(self):
+    def test_list_by_division(self):
+        run_cli(self.dir, "agency-import", "--roster", str(self.roster))
+        listing = run_cli(self.dir, "agency-list", "--division", "marketing")
+        self.assertIn("Reddit Ninja", listing.stdout)
+        self.assertNotIn("Frontend Wizard", listing.stdout)
+
+    def test_assign_to_specialist_is_briefed_not_done(self):
+        run_cli(self.dir, "agency-import", "--roster", str(self.roster))
+        result = run_cli(self.dir, "agency-assign", "--specialist", "marketing-reddit-ninja", "--task", "Launch post")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Status: briefed", result.stdout)
+        bad = run_cli(self.dir, "agency-assign", "--specialist", "nobody", "--task", "x")
+        self.assertNotEqual(bad.returncode, 0)
+
+    def test_import_missing_folder_fails(self):
         result = run_cli(self.dir, "agency-import", "--roster", str(Path(self.dir) / "nope"))
         self.assertNotEqual(result.returncode, 0)
 
-    def test_agency_list_empty_is_helpful(self):
+    def test_list_empty_is_helpful(self):
         result = run_cli(self.dir, "agency-list")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("agency-import", result.stdout)
 
-    def test_agency_import_is_idempotent(self):
+    def test_import_is_idempotent(self):
         run_cli(self.dir, "agency-import", "--roster", str(self.roster))
         second = run_cli(self.dir, "agency-import", "--roster", str(self.roster))
-        self.assertIn("0 new", second.stdout)
+        self.assertIn("0 new specialist(s)", second.stdout)
+
+
+class TestGrokBotGate(unittest.TestCase):
+    def test_grokbot_backend_blocked_without_experimental_flag(self):
+        with tempfile.TemporaryDirectory() as d:
+            result = run_cli(d, "--backend", "grokbot", "assign", "--department", "finance", "--task", "x")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("experimental", result.stderr)
+
+
+import os
+
+
+@unittest.skipUnless(os.environ.get("AGENCY_ROSTER"), "set AGENCY_ROSTER to a real agency-agents clone")
+class TestRealAgencyRoster(unittest.TestCase):
+    def test_real_roster_imports_many_agents(self):
+        with tempfile.TemporaryDirectory() as d:
+            result = run_cli(d, "agency-import", "--roster", os.environ["AGENCY_ROSTER"])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            state = json.loads((Path(d) / "state.json").read_text())
+            self.assertGreater(len(state["specialists"]), 200)
+            self.assertTrue(all(v["summary"] and v["summary"] != "---" for v in state["specialists"].values()))
+
+
+if __name__ == "__main__":
+    unittest.main()
