@@ -6,7 +6,7 @@ All commands run from the project folder. Global flags come before the command:
 python company.py [--backend local|grokbot] [--state PATH] <command> ...
 ```
 
-`--backend local` (default) is free and offline. `--backend grokbot` sends the
+`--backend local` (default) is free and offline. `--backend grokbot` (experimental, needs `--experimental-grokbot`) sends the
 same orders to real Grok Bot agents through the `gbot` CLI.
 
 ## org
@@ -78,19 +78,29 @@ run the full sequence.
 
 ## agency-import
 
-Import specialist agents from an Agency Agents roster folder (for example a
-clone of your agency-agents fork). Scans recursively for agent `.md` files and
-registers each one; running it again only adds new agents.
+Import specialists from a clone of agency-agents. Only files with agent front
+matter are imported; the top folder is the division. Safe to re-run.
 
 ```sh
-git clone https://github.com/ganeshsavara61-netizen/agency-agents
 python company.py agency-import --roster agency-agents
 ```
 
 ## agency-list
 
-List the imported specialist agents with a one-line summary of each.
-
 ```sh
 python company.py agency-list
+python company.py agency-list --division engineering
 ```
+
+## agency-assign
+
+Record a task briefed to one specialist (status `briefed`, no AI call).
+
+```sh
+python company.py agency-assign --specialist finance-fpa-analyst --task "Draft a 3 month budget"
+```
+
+## Experimental Grok Bot backend
+
+`--backend grokbot` is blocked unless `--experimental-grokbot` is also given.
+Untested, needs a paid Grok Bot plan.
